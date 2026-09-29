@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import time
 import urllib.parse
 from decimal import Decimal
 
@@ -28,7 +29,6 @@ from eventyay_bitpay.operational_log import (
     OUTCOME_FAILURE,
     OUTCOME_SUCCESS,
     log_operation,
-    logged_request,
 )
 
 from .models import ReferencedBitPayObject
@@ -303,8 +303,9 @@ def auth_start(request, **kwargs):
         url = (
             "https://test.bitpay.com" if "test" in request.GET else "https://bitpay.com"
         )
+    started = time.monotonic()
     try:
-        r = logged_request("bitpay", "POST", 
+        r = requests.post(
             url + "/tokens",
             json={
                 "label": settings.INSTANCE_NAME,
@@ -313,8 +314,26 @@ def auth_start(request, **kwargs):
             },
         )
     except requests.ConnectionError:
+        log_operation(
+            "connection.request",
+            OUTCOME_FAILURE,
+            backend="bitpay",
+            payment_provider="bitpay",
+            error_code="request_error",
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
         messages.error(request, _("Communication with BitPay was not successful."))
     else:
+        failed = r.status_code >= 400
+        log_operation(
+            "connection.request",
+            OUTCOME_FAILURE if failed else OUTCOME_SUCCESS,
+            backend="bitpay",
+            payment_provider="bitpay",
+            status=r.status_code,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            error_code="http_error" if failed else None,
+        )
         if r.status_code == 200:
             data = r.json()["data"][0]
             request.event.settings.payment_bitpay_token = data["token"]

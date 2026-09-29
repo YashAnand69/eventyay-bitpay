@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import time
 from collections import OrderedDict
 from json import JSONDecodeError
 from typing import Union
@@ -24,7 +25,6 @@ from eventyay_bitpay.operational_log import (
     OUTCOME_FAILURE,
     OUTCOME_SUCCESS,
     log_operation,
-    logged_request,
 )
 
 from .models import ReferencedBitPayObject
@@ -305,11 +305,20 @@ class BitPay(BasePaymentProvider):
             "X-Signature": xsignature,
             "X-accept-version": "2.0.0",
         }
+        started = time.monotonic()
         try:
-            response = logged_request("bitpay", "POST", 
+            response = requests.post(
                 uri, data=payload, headers=headers, verify=self.client.verify
             )
         except Exception:
+            log_operation(
+                "connection.request",
+                OUTCOME_FAILURE,
+                backend="bitpay",
+                payment_provider="bitpay",
+                error_code="request_error",
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
             logger.exception("Failure during bitpay refund.")
             raise PaymentException(
                 _(
@@ -317,6 +326,16 @@ class BitPay(BasePaymentProvider):
                     "with us if this problem persists."
                 )
             )
+        failed = not response.ok
+        log_operation(
+            "connection.request",
+            OUTCOME_FAILURE if failed else OUTCOME_SUCCESS,
+            backend="bitpay",
+            payment_provider="bitpay",
+            status=response.status_code,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            error_code="http_error" if failed else None,
+        )
         if not response.ok:
             try:
                 e = response.json()["error"]
