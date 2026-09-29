@@ -22,6 +22,7 @@ from requests import RequestException
 
 from eventyay_bitpay.operational_log import (
     OUTCOME_FAILURE,
+    OUTCOME_SUCCESS,
     log_operation,
     logged_request,
 )
@@ -218,13 +219,29 @@ class BitPay(BasePaymentProvider):
             )
         except RequestException:
             logger.exception("Failure during bitpay payment.")
-            log_operation("payment.charge", OUTCOME_FAILURE, backend="bitpay", payment_provider="bitpay", error_code="request_error", event_id=self.event.pk, order_id=payment.order_id)
+            log_operation(
+                "payment.charge",
+                OUTCOME_FAILURE,
+                backend="bitpay",
+                payment_provider="bitpay",
+                error_code="request_error",
+                event_id=self.event.pk,
+                order_id=payment.order_id,
+            )
             raise PaymentException(
                 _(
                     "We had trouble communicating with BitPay. Please try again and get in touch "
                     "with us if this problem persists."
                 )
             )
+        log_operation(
+            "payment.charge",
+            OUTCOME_SUCCESS,
+            backend="bitpay",
+            payment_provider="bitpay",
+            event_id=self.event.pk,
+            order_id=payment.order_id,
+        )
         ReferencedBitPayObject.objects.get_or_create(
             order=payment.order, payment=payment, reference=inv["id"]
         )
