@@ -80,10 +80,44 @@ def webhook(request, *args, **kwargs):
             "order", "order__event"
         ).get(reference=objid)
         if rso.order.event != request.event:
+            log_operation(
+                "webhook.inbound",
+                OUTCOME_FAILURE,
+                backend="bitpay",
+                payment_provider="bitpay",
+                error_code="event_mismatch",
+                status=200,
+                event_id=getattr(request.event, "pk", None),
+                order_id=rso.order_id,
+            )
             return HttpResponse("Unable to detect event", status=200)
-        log_operation("webhook.inbound", OUTCOME_SUCCESS, backend="bitpay", payment_provider="bitpay", status=200, event_id=rso.order.event_id, order_id=rso.order_id)
         rso.order.log_action("eventyay_bitpay.event", data=event_json)
-        return process_invoice(rso.order, rso.payment, objid)
+        try:
+            response = process_invoice(rso.order, rso.payment, objid)
+        except Exception:
+            log_operation(
+                "webhook.inbound",
+                OUTCOME_FAILURE,
+                backend="bitpay",
+                payment_provider="bitpay",
+                error_code="processing_error",
+                event_id=rso.order.event_id,
+                order_id=rso.order_id,
+            )
+            raise
+        status = getattr(response, "status_code", None)
+        failed = isinstance(status, int) and status >= 400
+        log_operation(
+            "webhook.inbound",
+            OUTCOME_FAILURE if failed else OUTCOME_SUCCESS,
+            backend="bitpay",
+            payment_provider="bitpay",
+            error_code="processing_error" if failed else None,
+            status=status if isinstance(status, int) else None,
+            event_id=rso.order.event_id,
+            order_id=rso.order_id,
+        )
+        return response
     except ReferencedBitPayObject.DoesNotExist:
         log_operation("webhook.inbound", OUTCOME_FAILURE, backend="bitpay", payment_provider="bitpay", error_code="unknown_reference", status=200)
         return HttpResponse("Unable to detect event", status=200)
