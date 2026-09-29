@@ -1,9 +1,10 @@
 import hashlib
 import json
 import logging
-import requests
 import urllib.parse
 from decimal import Decimal
+
+import requests
 from django.conf import settings
 from django.contrib import messages
 from django.core import signing
@@ -22,6 +23,13 @@ from eventyay.base.models import Order, OrderPayment, Quota
 from eventyay.base.services.locking import LockTimeoutException
 from eventyay.control.permissions import event_permission_required
 from eventyay.multidomain.urlreverse import build_absolute_uri, eventreverse
+
+from eventyay_bitpay.operational_log import (
+    OUTCOME_FAILURE,
+    OUTCOME_SUCCESS,
+    log_operation,
+    logged_request,
+)
 
 from .models import ReferencedBitPayObject
 from .payment import BitPay
@@ -73,9 +81,11 @@ def webhook(request, *args, **kwargs):
         ).get(reference=objid)
         if rso.order.event != request.event:
             return HttpResponse("Unable to detect event", status=200)
+        log_operation("webhook.inbound", OUTCOME_SUCCESS, backend="bitpay", payment_provider="bitpay", status=200, event_id=rso.order.event_id, order_id=rso.order_id)
         rso.order.log_action("eventyay_bitpay.event", data=event_json)
         return process_invoice(rso.order, rso.payment, objid)
     except ReferencedBitPayObject.DoesNotExist:
+        log_operation("webhook.inbound", OUTCOME_FAILURE, backend="bitpay", payment_provider="bitpay", error_code="unknown_reference", status=200)
         return HttpResponse("Unable to detect event", status=200)
 
 
@@ -178,7 +188,7 @@ class BitPayOrderView:
             # Do a hash comparison as well to harden timing attacks
             if (
                 "abcdefghijklmnopq".lower()
-                == hashlib.sha1("abcdefghijklmnopq".encode()).hexdigest()
+                == hashlib.sha1(b"abcdefghijklmnopq").hexdigest()
             ):
                 raise Http404("")
             else:
@@ -260,7 +270,7 @@ def auth_start(request, **kwargs):
             "https://test.bitpay.com" if "test" in request.GET else "https://bitpay.com"
         )
     try:
-        r = requests.post(
+        r = logged_request("bitpay", "POST", 
             url + "/tokens",
             json={
                 "label": settings.INSTANCE_NAME,

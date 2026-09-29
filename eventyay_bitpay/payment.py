@@ -1,24 +1,30 @@
-from typing import Union
-
 import hashlib
 import json
 import logging
-import requests
 from collections import OrderedDict
+from json import JSONDecodeError
+from typing import Union
+
+import requests
 from django import forms
 from django.core import signing
 from django.http import HttpRequest
 from django.template.loader import get_template
 from django.urls import reverse
 from django.utils.functional import cached_property
-from django.utils.translation import gettext_lazy as _  # NoQA
-from i18nfield.forms import I18nFormField, I18nTextInput
-from i18nfield.strings import LazyI18nString
-from json import JSONDecodeError
+from django.utils.translation import gettext_lazy as _
 from eventyay.base.models import OrderPayment, OrderRefund
 from eventyay.base.payment import BasePaymentProvider, PaymentException
 from eventyay.multidomain.urlreverse import build_absolute_uri
+from i18nfield.forms import I18nFormField, I18nTextInput
+from i18nfield.strings import LazyI18nString
 from requests import RequestException
+
+from eventyay_bitpay.operational_log import (
+    OUTCOME_FAILURE,
+    log_operation,
+    logged_request,
+)
 
 from .models import ReferencedBitPayObject
 
@@ -212,6 +218,7 @@ class BitPay(BasePaymentProvider):
             )
         except RequestException:
             logger.exception("Failure during bitpay payment.")
+            log_operation("payment.charge", OUTCOME_FAILURE, backend="bitpay", payment_provider="bitpay", error_code="request_error", event_id=self.event.pk, order_id=payment.order_id)
             raise PaymentException(
                 _(
                     "We had trouble communicating with BitPay. Please try again and get in touch "
@@ -282,7 +289,7 @@ class BitPay(BasePaymentProvider):
             "X-accept-version": "2.0.0",
         }
         try:
-            response = requests.post(
+            response = logged_request("bitpay", "POST", 
                 uri, data=payload, headers=headers, verify=self.client.verify
             )
         except Exception:
@@ -299,7 +306,7 @@ class BitPay(BasePaymentProvider):
             except JSONDecodeError:
                 e = response
 
-            logger.exception("Failure during bitpay refund: {}".format(e))
+            logger.exception(f"Failure during bitpay refund: {e}")
             raise PaymentException(_("BitPay reported an error: {}").format(e))
 
     def execute_refund(self, refund: OrderRefund):
