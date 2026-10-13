@@ -271,8 +271,8 @@ keeps Black's 88-character line length, while linting retains the existing
 classification and the ``setup.py`` exemption. Naming checks such as
 ``N802`` remain disabled; the former ``W503`` check is replaced by the
 formatter's operator placement. Indentation is handled by the formatter.
-Generated migrations retain their existing lint
-exclusion and are also excluded from formatting.
+Generated migrations retain their existing Flake8-rule exemption, while
+Ruff still checks their import order and formatting.
 
 Package structure
 -----------------
